@@ -97,15 +97,10 @@ pub fn write_uleb(buf: &mut Vec<u8>, mut val: u64) {
 
 /// Computes the SHA-256 hash of `data` into `out`.
 ///
-/// libSystem, which every macOS process links against, exports the
-/// CommonCrypto implementation, so we use it rather than pulling in a
-/// Rust crypto crate.
+/// The linker runs on Linux as well as Darwin, so the implementation cannot
+/// depend on CommonCrypto's `CC_SHA256` symbol from libSystem.
 pub fn sha256(data: &[u8], out: &mut [u8; 32]) {
-    extern "C" {
-        fn CC_SHA256(data: *const u8, len: u32, md: *mut u8) -> *mut u8;
-    }
-    // SAFETY: CC_SHA256 reads `len` bytes and writes exactly 32 bytes.
-    unsafe {
-        CC_SHA256(data.as_ptr(), data.len() as u32, out.as_mut_ptr());
-    }
+    use sha2::{Digest, Sha256};
+
+    out.copy_from_slice(&Sha256::digest(data));
 }

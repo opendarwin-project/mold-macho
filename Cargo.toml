@@ -24,4 +24,5 @@ hashbrown = "0.17"
 libc = "0.2"
 memmap2 = "0.9"
 rayon = "1.12.0"
+sha2 = "0.10"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }

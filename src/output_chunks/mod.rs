@@ -290,8 +290,16 @@ fn create_segment_cmd<E: Arch>(ctx: &Context<E>, seg: &OutputSegment) -> Vec<u8>
 
     cmd.nsects = sects.len() as u32;
     cmd.cmdsize = (size_of::<SegmentCommand>() + sects.len() * size_of::<MachSection>()) as u32;
-    cmd.maxprot = segment_prot(seg.name);
-    cmd.initprot = segment_prot(seg.name);
+    let default_prot = segment_prot(seg.name);
+    let (maxprot, initprot) = ctx
+        .args
+        .segprots
+        .iter()
+        .find(|(name, _, _)| name.as_str() == seg.name)
+        .map(|(_, max, init)| (*max, *init))
+        .unwrap_or((default_prot, default_prot));
+    cmd.maxprot = maxprot;
+    cmd.initprot = initprot;
     // dyld makes __DATA_CONST read-only once binds are applied.
     if seg.name == "__DATA_CONST" {
         cmd.flags = SG_READ_ONLY;

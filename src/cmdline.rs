@@ -238,6 +238,23 @@ pub struct Args {
     /// True when -pagezero_size was given explicitly (it is an error
     /// anywhere but a main executable).
     pub explicit_pagezero: bool,
+    /// -static: a static executable (the kernel).  No dyld info,
+    /// chained fixups or lazy binding are emitted.
+    pub static_link: bool,
+    /// -pie: build a position-independent executable.
+    pub pie: bool,
+    /// -image_base: the VM address of the __TEXT segment.
+    pub image_base: Option<u64>,
+    /// -segaddr: explicit VM address for a named segment.
+    pub segaddrs: Vec<(String, u64)>,
+    /// -segprot: (segment, max_prot, init_prot) overrides.
+    pub segprots: Vec<(String, u32, u32)>,
+    /// -segment_order: the order segments appear in the load commands.
+    pub segment_order: Vec<String>,
+    /// -rename_section: (old_seg, old_sect, new_seg, new_sect).
+    pub rename_sections: Vec<(String, String, String, String)>,
+    /// -rename_segment: (old_seg, new_seg).
+    pub rename_segments: Vec<(String, String)>,
 }
 
 impl Default for Args {
@@ -328,6 +345,14 @@ impl Default for Args {
             local_keep_list: None,
             pagezero_size: 0x1_0000_0000,
             explicit_pagezero: false,
+            static_link: false,
+            pie: false,
+            image_base: None,
+            segaddrs: Vec::new(),
+            segprots: Vec::new(),
+            segment_order: Vec::new(),
+            rename_sections: Vec::new(),
+            rename_segments: Vec::new(),
         }
     }
 }
@@ -382,6 +407,24 @@ fn parse_hex(opt: &str, val: &str) -> u64 {
         Ok(num) => num,
         Err(_) => fatal!("malformed {opt}: {val}"),
     }
+}
+
+/// Parses an ld64 segment-protection string such as "r-x" or "rw-".
+fn parse_prot(opt: &str, val: &str) -> u32 {
+    if val.len() != 3 {
+        fatal!("malformed {opt} protection: {val}");
+    }
+    let mut prot = 0u32;
+    for (i, c) in val.chars().enumerate() {
+        match (i, c) {
+            (0, 'r') => prot |= VM_PROT_READ,
+            (1, 'w') => prot |= VM_PROT_WRITE,
+            (2, 'x') => prot |= VM_PROT_EXECUTE,
+            (_, '-') => {}
+            _ => fatal!("malformed {opt} protection: {val}"),
+        }
+    }
+    prot
 }
 
 /// Expands @file response-file arguments, splitting the file's contents
@@ -504,6 +547,48 @@ pub fn parse_args(cmdline: &[String]) -> Args {
             "-adhoc_codesign" => args.adhoc_codesign = true,
             "-no_adhoc_codesign" => args.adhoc_codesign = false,
             "-dynamic" => args.dynamic = true,
+            "-static" => args.static_link = true,
+            "-pie" => args.pie = true,
+            "-image_base" => args.image_base = Some(parse_hex(opt, next_arg(&mut i))),
+            "-segaddr" => {
+                let seg = next_arg(&mut i).to_string();
+                let addr = parse_hex(opt, next_arg(&mut i));
+                args.segaddrs.push((seg, addr));
+            }
+            "-segprot" => {
+                let seg = next_arg(&mut i).to_string();
+                let max = parse_prot(opt, next_arg(&mut i));
+                let init = parse_prot(opt, next_arg(&mut i));
+                args.segprots.push((seg, max, init));
+            }
+            "-segment_order" => {
+                args.segment_order = next_arg(&mut i)
+                    .split(':')
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+            }
+            "-rename_section" => {
+                let old_seg = next_arg(&mut i).to_string();
+                let old_sect = next_arg(&mut i).to_string();
+                let new_seg = next_arg(&mut i).to_string();
+                let new_sect = next_arg(&mut i).to_string();
+                args.rename_sections
+                    .push((old_seg, old_sect, new_seg, new_sect));
+            }
+            "-rename_segment" => {
+                let old = next_arg(&mut i).to_string();
+                let new = next_arg(&mut i).to_string();
+                args.rename_segments.push((old, new));
+            }
+            // -single_module / -multi_module select the (default) single
+            // module model; nothing to do.
+            "-single_module" | "-multi_module" => {}
+            // -version_load_command is ld64's hint to emit an
+            // LC_BUILD_VERSION/LC_VERSION_MIN command; mold always emits
+            // one.  -no_dead_strip_inits_and_terms keeps initializer and
+            // terminator atoms, which mold's dead-strip already retains.
+            "-version_load_command" | "-no_dead_strip_inits_and_terms" => {}
             "-headerpad" => args.headerpad = parse_hex(opt, next_arg(&mut i)),
             "-pagezero_size" => {
                 args.pagezero_size = parse_hex(opt, next_arg(&mut i));
